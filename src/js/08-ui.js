@@ -20,7 +20,7 @@ const UI = (() => {
   let scoresCache = null;
   let duelsCache = null;
   let pendingResults = null;
-  const settings = Object.assign({ touch: 'auto', padLeft: false, random: true }, LS.get('lk.settings', {}));
+  const settings = Object.assign({ touch: 'auto', padRight: false, random: true }, LS.get('lk.settings', {}));
 
   // ------------------------------------------------------------ montagem
   function build() {
@@ -138,9 +138,9 @@ const UI = (() => {
         const s = clamp(Math.min(areaH * 0.78, vw * 0.42), 110, 200);
         const js = s * 0.64;
         const gut = 18;
-        // padrão: direcional à direita e PULAR à esquerda
-        const padX = settings.padLeft ? gut : vw - gut - s;
-        const jumpX = settings.padLeft ? vw - gut - js - 6 : gut + 6;
+        // padrão: direcional à esquerda e PULAR à direita
+        const padX = settings.padRight ? vw - gut - s : gut;
+        const jumpX = settings.padRight ? gut + 6 : vw - gut - js - 6;
         place(pads[0], padX, top + (areaH - s) / 2, s);
         place(jumps[0], jumpX, top + (areaH - js) / 2 + s * 0.08, js);
       } else {
@@ -167,22 +167,24 @@ const UI = (() => {
       }
       cx = side;
       cy = (vh - ch) / 2;
-      const s = clamp(Math.min(side * 0.86, vh * 0.42), 96, 200);
+      let s = clamp(Math.min(side * 0.86, vh * 0.42), 96, 200);
+      // no duelo deitado, o PULAR fica acima do direcional e abaixo dos botões do topo
+      if (duel) s = Math.max(70, Math.min(s, (vh - 92) / 1.66));
       const js = s * 0.66;
       if (!duel) {
         const leftX = (side - s) / 2, rightX = vw - side + (side - js) / 2;
-        const padX = settings.padLeft ? leftX : vw - side + (side - s) / 2;
-        const jumpX = settings.padLeft ? rightX : (side - js) / 2;
+        const padX = settings.padRight ? vw - side + (side - s) / 2 : leftX;
+        const jumpX = settings.padRight ? (side - js) / 2 : rightX;
         place(pads[0], padX, vh - s - 26, s);
         place(jumps[0], jumpX, vh - js - 40, js);
       } else {
         place(pads[0], (side - s) / 2, vh - s - 20, s);
-        place(jumps[0], (side - js) / 2, vh - s - 20 - js - 18, js);
+        place(jumps[0], (side - js) / 2, Math.max(66, vh - s - 20 - js - 18), js);
         place(pads[1], vw - side + (side - s) / 2, vh - s - 20, s);
-        place(jumps[1], vw - side + (side - js) / 2, vh - s - 20 - js - 18, js);
+        place(jumps[1], vw - side + (side - js) / 2, Math.max(66, vh - s - 20 - js - 18), js);
       }
-      pauseX = side > 70 ? vw - side / 2 - 22 : cx + cw - 48;
-      pauseY = side > 70 ? 14 : cy + ch * 0.1;
+      pauseX = side > 70 ? vw - side / 2 - (duel ? 49 : 22) : cx + cw - 48;
+      pauseY = side > 70 ? (duel ? 10 : 14) : cy + ch * 0.1;
     }
     cv.style.left = Math.round(cx) + 'px';
     cv.style.top = Math.round(cy) + 'px';
@@ -192,7 +194,7 @@ const UI = (() => {
     pb.hidden = !inGame();
     // botão de som logo abaixo (ou ao lado, no celular em pé) do pause
     const sb = $('#btnSound');
-    const sideBySide = touch && portrait;
+    const sideBySide = touch && (portrait || duel);
     sb.style.left = Math.round(sideBySide ? pauseX + 54 : pauseX) + 'px';
     sb.style.top = Math.round(sideBySide ? pauseY : pauseY + 54) + 'px';
     sb.hidden = !inGame();
@@ -723,14 +725,14 @@ const UI = (() => {
               ${[['auto', 'Automático'], ['on', 'Sempre'], ['off', 'Nunca']].map(([v, l]) => `<button type="button" data-v="${v}" class="${settings.touch === v ? 'on' : ''}">${l}</button>`).join('')}
             </div>
           </div>
-          <label class="toggle"><span>Direcional à esquerda (PULAR à direita)</span><input type="checkbox" id="tLefty" ${settings.padLeft ? 'checked' : ''}></label>
+          <label class="toggle"><span>Direcional à direita (PULAR à esquerda)</span><input type="checkbox" id="tLefty" ${settings.padRight ? 'checked' : ''}></label>
           <label class="toggle"><span>Fases em ordem aleatória</span><input type="checkbox" id="tRandom" ${settings.random ? 'checked' : ''}></label>
           <button class="btn" type="button" id="tTest">Testar som</button>
           <button class="btn primary" type="button" data-go="home">Pronto</button>
         </div>`);
       $('#tSfx', s).addEventListener('change', (e) => { Sound.unlock(); Sound.setSfx(e.target.checked); });
       $('#tMus', s).addEventListener('change', (e) => { Sound.unlock(); Sound.setMusic(e.target.checked); });
-      $('#tLefty', s).addEventListener('change', (e) => { settings.padLeft = e.target.checked; LS.set('lk.settings', settings); });
+      $('#tLefty', s).addEventListener('change', (e) => { settings.padRight = e.target.checked; LS.set('lk.settings', settings); });
       $('#tRandom', s).addEventListener('change', (e) => { settings.random = e.target.checked; LS.set('lk.settings', settings); });
       $('#tTest', s).addEventListener('click', () => { Sound.unlock(); Sound.setSfx(true); Sound.play('item'); $('#tSfx', s).checked = true; });
       $$('#segTouch button', s).forEach((b) => b.addEventListener('click', () => {
