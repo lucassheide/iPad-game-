@@ -669,6 +669,14 @@ p { margin: 0; line-height: 1.45; }
 .seg button { min-height: 44px; border: 0; border-radius: 9px; background: transparent; font-weight: 800; color: var(--muted); }
 .seg button.on { background: var(--panel-2); color: var(--text); box-shadow: inset 0 -3px 0 var(--rung); }
 
+/* ---------------------------------------------------------------- instalar */
+.steps { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 10px; line-height: 1.45; }
+.steps li::marker { font-family: var(--font-display); color: var(--spark); }
+.steps b { color: var(--spark); }
+.urlbox { display: flex; gap: 8px; min-width: 0; }
+.urlbox input { flex: 1; min-width: 0; min-height: 52px; padding: 0 12px; border-radius: 12px; border: 2px solid var(--line); background: #0f0c27; color: var(--text); font: 700 0.95rem var(--font-body); -webkit-user-select: text; user-select: text; }
+.urlbox .btn { flex: none; }
+
 /* ---------------------------------------------------------------- pausa e fim */
 .ptitle { margin: 0 0 4px; text-align: center; font-family: var(--font-display); font-weight: 400; font-size: 2rem; color: var(--spark); text-shadow: 0 3px 0 #a8730a; }
 .winner { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 1.2rem; text-align: center; flex-wrap: wrap; }

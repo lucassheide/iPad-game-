@@ -51,6 +51,7 @@ const UI = (() => {
       if (e.code === 'Escape' || e.code === 'KeyP') pause(!Game.G.paused);
     };
     window.addEventListener('resize', layout);
+    ['fullscreenchange', 'webkitfullscreenchange'].forEach((ev) => document.addEventListener(ev, () => setTimeout(layout, 120)));
     window.addEventListener('orientationchange', () => setTimeout(layout, 250));
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
@@ -221,6 +222,34 @@ const UI = (() => {
     return `<span class="dot" style="--c:${p.color}"></span>`;
   }
 
+  // ------------------------------------------------------------ tela cheia
+  const APP_URL = 'https://lucassheide.github.io/iPad-game-/';
+  const isStandalone = () => window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches);
+  const fsActive = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+  const fsEnabled = () => {
+    const el = document.documentElement;
+    return !!(el.requestFullscreen || el.webkitRequestFullscreen) && (document.fullscreenEnabled || document.webkitFullscreenEnabled);
+  };
+
+  async function toggleFullscreen(back) {
+    Sound.unlock();
+    if (fsActive()) {
+      try { await (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (e) { /* ok */ }
+      return;
+    }
+    if (fsEnabled()) {
+      const el = document.documentElement;
+      try {
+        const r = (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+        if (r && r.then) await r;
+        if (screen.orientation && screen.orientation.lock) screen.orientation.lock('any').catch(() => {});
+        setTimeout(layout, 300);
+        return;
+      } catch (e) { /* cai nas instruções abaixo */ }
+    }
+    go('install', back);
+  }
+
   const SCREENS = {
     home() {
       Game.G.mode !== 'attract' && Game.startAttract();
@@ -252,9 +281,12 @@ const UI = (() => {
               <button class="btn ghost" data-go="help" type="button">Como jogar</button>
               <button class="btn ghost" data-go="settings" type="button">Ajustes</button>
             </div>
+            ${isStandalone() ? '' : '<button class="btn ghost" type="button" id="hFull">Tela cheia / instalar no iPad</button>'}
           </div>
           <p class="storage ${online ? 'on' : ''}">${online ? 'Ranking online: as contas e os pontos aparecem no iPad e no celular.' : 'Ranking salvo neste aparelho.'}</p>
         </div>`, 'home-screen');
+      const hf = $('#hFull', s);
+      if (hf) hf.addEventListener('click', () => toggleFullscreen('home'));
       Render.portrait($('#pLucas', s), 'lucas');
       Render.portrait($('#pLara', s), 'lara');
       Sound.music('menu');
@@ -630,6 +662,34 @@ const UI = (() => {
         </div>`);
     },
 
+    install(back) {
+      const ua = navigator.userAgent;
+      const ios = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      const android = /Android/.test(ua);
+      const steps = android
+        ? ['Copie o endereço abaixo e abra no <b>Chrome</b>.', 'Toque no menu <b>⋮</b> no canto de cima.', 'Escolha <b>Instalar app</b> ou <b>Adicionar à tela inicial</b>.', 'Abra o Lucas Kong pelo ícone: ele abre em tela cheia.']
+        : ['Copie o endereço abaixo e abra no <b>Safari</b>. No app do Claude essa opção não existe.', 'Toque no botão <b>Compartilhar</b> (o quadrado com a seta para cima).', 'Role a lista e toque em <b>Adicionar à Tela de Início</b>, depois em <b>Adicionar</b>.', 'Abra o Lucas Kong pelo ícone: ele abre em tela cheia, sem barras do navegador.'];
+      const s = show(`${header('Tela cheia', back || 'home')}
+        <div class="sheet">
+          <p class="lead">${ios || android ? 'Para jogar em tela cheia, instale o Lucas Kong na tela de início:' : 'Para jogar em tela cheia no iPad ou no celular, instale o Lucas Kong na tela de início:'}</p>
+          <ol class="steps">${steps.map((t) => `<li>${t}</li>`).join('')}</ol>
+          <div class="urlbox"><input id="appUrl" readonly value="${APP_URL}" aria-label="Endereço do jogo"><button class="btn primary" type="button" id="copyUrl">Copiar</button></div>
+          <p class="muted small">No app instalado, as contas e o ranking ficam salvos naquele aparelho. Nesta página do Claude, o ranking é compartilhado entre os seus aparelhos.</p>
+          <button class="btn ghost" type="button" data-go="${back || 'home'}">Voltar</button>
+        </div>`);
+      const inp = $('#appUrl', s);
+      $('#copyUrl', s).addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(APP_URL);
+          toast('Endereço copiado. Cole no Safari.');
+        } catch (e) {
+          inp.focus();
+          inp.select();
+          toast('Selecione e copie o endereço.');
+        }
+      });
+    },
+
     settings() {
       const s = show(`${header('Ajustes', 'home')}
         <div class="sheet">
@@ -663,6 +723,7 @@ const UI = (() => {
             <button class="btn" type="button" id="pSfx">${Sound.sfxOn ? 'Som: ligado' : 'Som: desligado'}</button>
             <button class="btn" type="button" id="pMus">${Sound.musicOn ? 'Música: ligada' : 'Música: desligada'}</button>
           </div>
+          ${isStandalone() || !fsEnabled() ? '' : `<button class="btn" type="button" id="pFull">${fsActive() ? 'Sair da tela cheia' : 'Tela cheia'}</button>`}
           <button class="btn" type="button" id="pRestart">Recomeçar partida</button>
           <button class="btn ghost" type="button" id="pQuit">Sair para o menu</button>
           <p class="muted center small" id="pNote">Ao sair, os pontos desta partida são salvos.</p>
@@ -670,6 +731,11 @@ const UI = (() => {
       $('#pCont', s).addEventListener('click', () => pause(false));
       $('#pSfx', s).addEventListener('click', (e) => { Sound.setSfx(!Sound.sfxOn); e.target.textContent = Sound.sfxOn ? 'Som: ligado' : 'Som: desligado'; });
       $('#pMus', s).addEventListener('click', (e) => { Sound.setMusic(!Sound.musicOn); e.target.textContent = Sound.musicOn ? 'Música: ligada' : 'Música: desligada'; });
+      const pf = $('#pFull', s);
+      if (pf) pf.addEventListener('click', async () => {
+        await toggleFullscreen('home');
+        pf.textContent = fsActive() ? 'Sair da tela cheia' : 'Tela cheia';
+      });
       $('#pRestart', s).addEventListener('click', () => {
         const cfg = session;
         startGame(cfg);
