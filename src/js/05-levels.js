@@ -13,15 +13,33 @@ function surfY(p, x) {
   return p.y1 + ((p.y2 - p.y1) * (x - p.x1)) / (p.x2 - p.x1);
 }
 
-function faseInfo(fase) {
-  const type = STAGE_TYPES[(fase - 1) % 4];
+// seed = null: ordem clássica. Com seed: ordem, espelho e cores sorteados por partida
+// (a Fase 1 é sempre Barris).
+function faseInfo(fase, seed) {
   const loop = Math.floor((fase - 1) / 4) + 1;
+  let type = STAGE_TYPES[(fase - 1) % 4];
+  let mirror = loop % 2 === 0;
+  let theme = THEMES[(loop - 1) % THEMES.length];
+  if (seed != null) {
+    const r = seeded(seed * 7919 + loop * 104729);
+    const order = STAGE_TYPES.slice();
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(r() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    if (loop === 1) order.splice(0, 0, order.splice(order.indexOf('barrels'), 1)[0]);
+    type = order[(fase - 1) % 4];
+    const r2 = seeded(seed * 31 + fase * 977);
+    r2();
+    mirror = fase === 1 ? false : r2() < 0.5;
+    theme = fase === 1 ? THEMES[0] : THEMES[Math.floor(r2() * THEMES.length)];
+  }
   return {
     fase,
     type,
     loop,
-    mirror: loop % 2 === 0,
-    theme: THEMES[(loop - 1) % THEMES.length],
+    mirror,
+    theme,
     meters: fase * 25,
     name: STAGE_INFO[type].name,
     hint: STAGE_INFO[type].hint,
@@ -131,6 +149,16 @@ function makeBuilder(mirror) {
   return L;
 }
 
+// Sorteia posições de escadas num intervalo, com distância mínima entre elas.
+function pickSpots(rng, n, lo, hi, minGap, taken) {
+  const out = [];
+  for (let tries = 0; tries < 60 && out.length < n; tries++) {
+    const x = Math.round(lo + rng() * (hi - lo));
+    if (out.concat(taken || []).every((o) => Math.abs(o - x) >= minGap)) out.push(x);
+  }
+  return out;
+}
+
 function buildBarrels(L) {
   const lp = L.plat(88, 52, 136, 52, { dir: 1 });
   const g5a = L.plat(0, 80, 144, 80, { dir: 1 });
@@ -142,20 +170,41 @@ function buildBarrels(L) {
   const g0 = L.plat(0, 247, 224, 241);
   const g5 = [g5a, g5b];
 
-  L.ladder(80, g0, g1, { broken: true });
-  L.ladder(184, g0, g1);
-  L.ladder(32, g1, g2);
-  L.ladder(104, g1, g2);
-  L.ladder(72, g2, g3, { broken: true });
-  L.ladder(160, g2, g3);
-  L.ladder(32, g3, g4);
-  L.ladder(112, g3, g4, { broken: true });
-  L.ladder(80, g4, g5, { broken: true });
-  L.ladder(184, g4, g5);
-  L.ladder(128, g5, lp);
-
-  L.hammer(40, g1);
-  L.hammer(168, g4);
+  if (!L.rng) {
+    L.ladder(80, g0, g1, { broken: true });
+    L.ladder(184, g0, g1);
+    L.ladder(32, g1, g2);
+    L.ladder(104, g1, g2);
+    L.ladder(72, g2, g3, { broken: true });
+    L.ladder(160, g2, g3);
+    L.ladder(32, g3, g4);
+    L.ladder(112, g3, g4, { broken: true });
+    L.ladder(80, g4, g5, { broken: true });
+    L.ladder(184, g4, g5);
+    L.ladder(128, g5, lp);
+    L.hammer(40, g1);
+    L.hammer(168, g4);
+  } else {
+    // escadas sorteadas: sempre ao menos uma inteira por andar
+    const r = L.rng;
+    const gaps = [[g0, g1, 40, 198], [g1, g2, 24, 198], [g2, g3, 24, 198], [g3, g4, 24, 198], [g4, g5, 76, 198]];
+    let prev = [];
+    gaps.forEach(([lo, up, a, b]) => {
+      let full = pickSpots(r, r() < 0.55 ? 2 : 1, a, b, 34, prev);
+      if (!full.length) full = pickSpots(r, 1, a, b, 12, prev);
+      if (!full.length) full = [Math.round((a + b) / 2)];
+      const broken = pickSpots(r, Math.floor(r() * 3), a, b, 26, prev.concat(full));
+      full.forEach((x) => L.ladder(x, lo, up));
+      broken.forEach((x) => L.ladder(x, lo, up, { broken: true }));
+      prev = full.concat(broken);
+    });
+    L.ladder(96 + Math.round(r() * 36), g5, lp);
+    const used = L.ladders.map((ld) => (L.mirror ? W - ld.x : ld.x));
+    const h1 = pickSpots(r, 1, 40, 190, 12, used)[0] || 120;
+    const h2 = pickSpots(r, 1, 40, 190, 12, used)[0] || 140;
+    L.hammer(h1, r() < 0.5 ? g1 : g2);
+    L.hammer(h2, r() < 0.5 ? g3 : g4);
+  }
 
   L.goal = lp;
   L.bottom = g0;
@@ -276,16 +325,36 @@ function buildRivets(L) {
   const lp = L.plat(150, 56, 186, 56);
   const [F1, F2, F3, F4] = rows;
 
-  [16, 112, 208].forEach((x) => L.ladder(x, f0, F1));
-  [24, 88, 136, 200].forEach((x) => L.ladder(x, F1, F2));
-  [32, 112, 192].forEach((x) => L.ladder(x, F2, F3));
-  [40, 80, 144, 184].forEach((x) => L.ladder(x, F3, F4));
-
-  L.hammer(42, F2[0]);
-  L.hammer(186, F3[4]);
-  L.item(112, F1[2], 'bolsa');
-  L.item(190, F2[4], 'guarda-chuva');
-  L.item(44, F4[0], 'chapéu');
+  if (!L.rng) {
+    [16, 112, 208].forEach((x) => L.ladder(x, f0, F1));
+    [24, 88, 136, 200].forEach((x) => L.ladder(x, F1, F2));
+    [32, 112, 192].forEach((x) => L.ladder(x, F2, F3));
+    [40, 80, 144, 184].forEach((x) => L.ladder(x, F3, F4));
+    L.hammer(42, F2[0]);
+    L.hammer(186, F3[4]);
+    L.item(112, F1[2], 'bolsa');
+    L.item(190, F2[4], 'guarda-chuva');
+    L.item(44, F4[0], 'chapéu');
+  } else {
+    const r = L.rng;
+    const pairs = [[f0, F1, 0], [F1, F2, 1], [F2, F3, 2], [F3, F4, 3]];
+    pairs.forEach(([lo, up, i]) => {
+      const a = spans[i][0] + 8, b = spans[i][1] - 8;
+      const xs = pickSpots(r, 1 + Math.floor(r() * 2), 70, 154, 30, []);
+      if (r() < 0.65) xs.push(Math.round(a + r() * (46 - a)));
+      if (r() < 0.65) xs.push(Math.round(178 + r() * (b - 178)));
+      xs.forEach((x) => L.ladder(x, lo, up));
+    });
+    const kinds = ['bolsa', 'guarda-chuva', 'chapéu'];
+    const rows2 = [F1, F2, F3, F4];
+    L.hammer(Math.round(70 + r() * 84), rows2[r() < 0.5 ? 0 : 1][2]);
+    L.hammer(Math.round(70 + r() * 84), rows2[2][2]);
+    kinds.forEach((k, i) => {
+      const row = rows2[(i + Math.floor(r() * 4)) % 4];
+      const seg = row[2];
+      L.item(Math.round(70 + r() * 84), seg, k);
+    });
+  }
 
   L.goal = null;
   L.bottom = f0;
@@ -298,9 +367,10 @@ function buildRivets(L) {
 
 const BUILDERS = { barrels: buildBarrels, conveyor: buildConveyor, elevator: buildElevator, rivets: buildRivets };
 
-function buildLevel(fase) {
-  const info = faseInfo(fase);
+function buildLevel(fase, seed) {
+  const info = faseInfo(fase, seed);
   const L = makeBuilder(info.mirror);
+  L.rng = seed != null ? seeded(seed * 131 + fase * 7331) : null;
   BUILDERS[info.type](L);
   Object.assign(L, info);
   L.diff = difficulty(info.loop);

@@ -8,6 +8,8 @@ const ICON = {
   lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>',
   trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   gear: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zm8.2 4.6l1.6 1.2-1.8 3.2-1.9-.7a7.6 7.6 0 0 1-1.7 1l-.3 2h-3.6l-.3-2a7.6 7.6 0 0 1-1.7-1l-1.9.7-1.8-3.2 1.6-1.2a7.4 7.4 0 0 1 0-2l-1.6-1.2 1.8-3.2 1.9.7a7.6 7.6 0 0 1 1.7-1l.3-2h3.6l.3 2a7.6 7.6 0 0 1 1.7 1l1.9-.7 1.8 3.2-1.6 1.2a7.4 7.4 0 0 1 0 2z"/></svg>',
+  soundOn: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  soundOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 9.5l5 5M21.5 9.5l-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   arrow: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5l7 9H5z"/></svg>',
 };
 
@@ -18,7 +20,7 @@ const UI = (() => {
   let scoresCache = null;
   let duelsCache = null;
   let pendingResults = null;
-  const settings = Object.assign({ touch: 'auto', lefty: false }, LS.get('lk.settings', {}));
+  const settings = Object.assign({ touch: 'auto', padLeft: false, random: true }, LS.get('lk.settings', {}));
 
   // ------------------------------------------------------------ montagem
   function build() {
@@ -31,6 +33,7 @@ const UI = (() => {
         <div class="pad ctl" id="pad1" data-dir=""><span class="ar u">${ICON.arrow}</span><span class="ar r">${ICON.arrow}</span><span class="ar d">${ICON.arrow}</span><span class="ar l">${ICON.arrow}</span><span class="knob"></span></div>
         <button class="jump ctl" id="jump1" type="button">PULAR</button>
         <button class="iconbtn" id="btnPause" type="button" aria-label="Pausar">${ICON.pause}</button>
+        <button class="iconbtn" id="btnSound" type="button" aria-label="Som">${ICON.soundOn}</button>
       </div>
       <div id="screens"></div>
       <div id="toast" role="status" aria-live="polite" hidden></div>`;
@@ -44,6 +47,17 @@ const UI = (() => {
     Input.bindJump($('#jump1'), 1);
     // no modo solo/revezamento, os dois conjuntos controlam o jogador da vez
     $('#btnPause').addEventListener('click', () => pause(true));
+    const paintSound = () => ($('#btnSound').innerHTML = Sound.sfxOn || Sound.musicOn ? ICON.soundOn : ICON.soundOff);
+    paintSound();
+    $('#btnSound').addEventListener('click', () => {
+      Sound.unlock();
+      const on = !(Sound.sfxOn || Sound.musicOn);
+      Sound.setSfx(on);
+      Sound.setMusic(on);
+      paintSound();
+      toast(on ? 'Som ligado' : 'Som desligado');
+      if (on) Sound.play('item');
+    });
     ['pointerdown', 'touchstart'].forEach((ev) => play.addEventListener(ev, () => Sound.unlock(), { passive: true }));
     play.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
     Input.onKey = (e) => {
@@ -124,8 +138,9 @@ const UI = (() => {
         const s = clamp(Math.min(areaH * 0.78, vw * 0.42), 110, 200);
         const js = s * 0.64;
         const gut = 18;
-        const padX = settings.lefty ? vw - gut - s : gut;
-        const jumpX = settings.lefty ? gut + 6 : vw - gut - js - 6;
+        // padrão: direcional à direita e PULAR à esquerda
+        const padX = settings.padLeft ? gut : vw - gut - s;
+        const jumpX = settings.padLeft ? vw - gut - js - 6 : gut + 6;
         place(pads[0], padX, top + (areaH - s) / 2, s);
         place(jumps[0], jumpX, top + (areaH - js) / 2 + s * 0.08, js);
       } else {
@@ -156,8 +171,8 @@ const UI = (() => {
       const js = s * 0.66;
       if (!duel) {
         const leftX = (side - s) / 2, rightX = vw - side + (side - js) / 2;
-        const padX = settings.lefty ? vw - side + (side - s) / 2 : leftX;
-        const jumpX = settings.lefty ? (side - js) / 2 : rightX;
+        const padX = settings.padLeft ? leftX : vw - side + (side - s) / 2;
+        const jumpX = settings.padLeft ? rightX : (side - js) / 2;
         place(pads[0], padX, vh - s - 26, s);
         place(jumps[0], jumpX, vh - js - 40, js);
       } else {
@@ -175,6 +190,12 @@ const UI = (() => {
     pb.style.left = Math.round(pauseX) + 'px';
     pb.style.top = Math.round(pauseY) + 'px';
     pb.hidden = !inGame();
+    // botão de som logo abaixo (ou ao lado, no celular em pé) do pause
+    const sb = $('#btnSound');
+    const sideBySide = touch && portrait;
+    sb.style.left = Math.round(sideBySide ? pauseX + 54 : pauseX) + 'px';
+    sb.style.top = Math.round(sideBySide ? pauseY : pauseY + 54) + 'px';
+    sb.hidden = !inGame();
     // cores dos controles no duelo
     if (session && duel) {
       pads[0].style.setProperty('--c', session.players[0].color);
@@ -524,6 +545,7 @@ const UI = (() => {
       const tiles = [];
       for (let f = 1; f <= maxShow; f++) {
         const info = faseInfo(f);
+        if (settings.random && f > 1) info.name = 'Surpresa';
         const open = f <= unlocked;
         tiles.push(`<button class="tile ${open ? '' : 'locked'}" type="button" data-f="${f}" ${open ? '' : 'disabled'} style="--c:${info.theme.girder}">
           <b>${f}</b><span>${info.name}</span><em>${info.meters} m</em>${open ? '' : `<i class="lk">${ICON.lock}</i>`}</button>`);
@@ -701,12 +723,16 @@ const UI = (() => {
               ${[['auto', 'Automático'], ['on', 'Sempre'], ['off', 'Nunca']].map(([v, l]) => `<button type="button" data-v="${v}" class="${settings.touch === v ? 'on' : ''}">${l}</button>`).join('')}
             </div>
           </div>
-          <label class="toggle"><span>Modo canhoto (pular à esquerda)</span><input type="checkbox" id="tLefty" ${settings.lefty ? 'checked' : ''}></label>
+          <label class="toggle"><span>Direcional à esquerda (PULAR à direita)</span><input type="checkbox" id="tLefty" ${settings.padLeft ? 'checked' : ''}></label>
+          <label class="toggle"><span>Fases em ordem aleatória</span><input type="checkbox" id="tRandom" ${settings.random ? 'checked' : ''}></label>
+          <button class="btn" type="button" id="tTest">Testar som</button>
           <button class="btn primary" type="button" data-go="home">Pronto</button>
         </div>`);
       $('#tSfx', s).addEventListener('change', (e) => { Sound.unlock(); Sound.setSfx(e.target.checked); });
       $('#tMus', s).addEventListener('change', (e) => { Sound.unlock(); Sound.setMusic(e.target.checked); });
-      $('#tLefty', s).addEventListener('change', (e) => { settings.lefty = e.target.checked; LS.set('lk.settings', settings); });
+      $('#tLefty', s).addEventListener('change', (e) => { settings.padLeft = e.target.checked; LS.set('lk.settings', settings); });
+      $('#tRandom', s).addEventListener('change', (e) => { settings.random = e.target.checked; LS.set('lk.settings', settings); });
+      $('#tTest', s).addEventListener('click', () => { Sound.unlock(); Sound.setSfx(true); Sound.play('item'); $('#tSfx', s).checked = true; });
       $$('#segTouch button', s).forEach((b) => b.addEventListener('click', () => {
         settings.touch = b.dataset.v;
         LS.set('lk.settings', settings);
@@ -836,6 +862,7 @@ const UI = (() => {
     Sound.unlock();
     Game.start({
       mode: cfg.mode,
+      random: settings.random,
       startFase: cfg.startFase || 1,
       hiscore: topScore(scores),
       players: cfg.players.map((p) => ({ pid: p.id || null, name: p.name, color: p.color })),
@@ -849,6 +876,7 @@ const UI = (() => {
     if (v) go('pause');
     else hideScreens();
     $('#btnPause').hidden = v;
+    $('#btnSound').hidden = v;
   }
 
   function onProgress(data) {
@@ -899,6 +927,7 @@ const UI = (() => {
   async function onGameOver(r) {
     const cfg = session;
     $('#btnPause').hidden = true;
+    $('#btnSound').hidden = true;
     const saved = await saveResults(r, false);
     setTimeout(() => {
       if (session !== cfg) return;

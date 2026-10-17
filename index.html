@@ -196,7 +196,8 @@ input:focus-visible {
   height: 40px;
 }
 
-#btnPause {
+#btnPause,
+#btnSound {
   position: absolute;
   z-index: 3;
 }
@@ -1068,7 +1069,40 @@ const Sound = (() => {
   let step = 0;
   let nextTime = 0;
 
+  // No iPhone/iPad o som só liga depois de um toque, e a chave de silencioso
+  // emudece o WebAudio. Isto força a sessão de áudio em modo "reprodução".
+  let silentEl = null;
+  function silentWav() {
+    const n = 800, buf = new ArrayBuffer(44 + n), v = new DataView(buf);
+    const w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+    w(0, 'RIFF'); v.setUint32(4, 36 + n, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 8000, true);
+    v.setUint16(32, 1, true); v.setUint16(34, 8, true); w(36, 'data'); v.setUint32(40, n, true);
+    for (let i = 0; i < n; i++) v.setUint8(44 + i, 128);
+    let bin = '';
+    new Uint8Array(buf).forEach((b) => (bin += String.fromCharCode(b)));
+    return 'data:audio/wav;base64,' + btoa(bin);
+  }
+
+  function iosSession() {
+    try {
+      if (navigator.audioSession) navigator.audioSession.type = 'playback';
+    } catch (e) { /* navegador sem audioSession */ }
+    try {
+      if (!silentEl) {
+        silentEl = document.createElement('audio');
+        silentEl.src = silentWav();
+        silentEl.loop = true;
+        silentEl.setAttribute('playsinline', '');
+        silentEl.volume = 0.01;
+      }
+      const pr = silentEl.play();
+      if (pr && pr.catch) pr.catch(() => {});
+    } catch (e) { /* opcional */ }
+  }
+
   function unlock() {
+    iosSession();
     if (!ctx) {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
@@ -1085,15 +1119,28 @@ const Sound = (() => {
       master.connect(comp);
       comp.connect(ctx.destination);
       sfxBus = ctx.createGain();
-      sfxBus.gain.value = sfxOn ? 0.55 : 0;
+      sfxBus.gain.value = sfxOn ? 0.85 : 0;
       sfxBus.connect(master);
       musBus = ctx.createGain();
-      musBus.gain.value = musOn ? 0.22 : 0;
+      musBus.gain.value = musOn ? 0.34 : 0;
       musBus.connect(master);
       setInterval(schedule, 40);
     }
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    if (ctx.state !== 'running') ctx.resume().catch(() => {});
+    // um buffer mudo tocado dentro do toque destrava o áudio no Safari
+    try {
+      const b = ctx.createBuffer(1, 1, 22050);
+      const src = ctx.createBufferSource();
+      src.buffer = b;
+      src.connect(ctx.destination);
+      src.start(0);
+    } catch (e) { /* ok */ }
   }
+
+  ['touchend', 'click', 'keydown', 'pointerup'].forEach((ev) =>
+    window.addEventListener(ev, () => {
+      if (!ctx || ctx.state !== 'running') unlock();
+    }, { capture: true, passive: true }));
 
   const mfreq = (n) => 440 * Math.pow(2, (n - 69) / 12);
 
@@ -1265,13 +1312,13 @@ const Sound = (() => {
   function setSfx(on) {
     sfxOn = on;
     LS.set('lk.sfx', on);
-    if (sfxBus) sfxBus.gain.value = on ? 0.55 : 0;
+    if (sfxBus) sfxBus.gain.value = on ? 0.85 : 0;
   }
 
   function setMusic(on) {
     musOn = on;
     LS.set('lk.music', on);
-    if (musBus) musBus.gain.value = on ? 0.22 : 0;
+    if (musBus) musBus.gain.value = on ? 0.34 : 0;
   }
 
   function play(name, arg) {
@@ -1288,7 +1335,7 @@ const Sound = (() => {
     setSfx,
     setMusic,
     suspend() { if (ctx && ctx.state === 'running') ctx.suspend().catch(() => {}); },
-    resume() { if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {}); },
+    resume() { if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {}); },
   };
 })();
 
@@ -2620,15 +2667,33 @@ function surfY(p, x) {
   return p.y1 + ((p.y2 - p.y1) * (x - p.x1)) / (p.x2 - p.x1);
 }
 
-function faseInfo(fase) {
-  const type = STAGE_TYPES[(fase - 1) % 4];
+// seed = null: ordem clássica. Com seed: ordem, espelho e cores sorteados por partida
+// (a Fase 1 é sempre Barris).
+function faseInfo(fase, seed) {
   const loop = Math.floor((fase - 1) / 4) + 1;
+  let type = STAGE_TYPES[(fase - 1) % 4];
+  let mirror = loop % 2 === 0;
+  let theme = THEMES[(loop - 1) % THEMES.length];
+  if (seed != null) {
+    const r = seeded(seed * 7919 + loop * 104729);
+    const order = STAGE_TYPES.slice();
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(r() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    if (loop === 1) order.splice(0, 0, order.splice(order.indexOf('barrels'), 1)[0]);
+    type = order[(fase - 1) % 4];
+    const r2 = seeded(seed * 31 + fase * 977);
+    r2();
+    mirror = fase === 1 ? false : r2() < 0.5;
+    theme = fase === 1 ? THEMES[0] : THEMES[Math.floor(r2() * THEMES.length)];
+  }
   return {
     fase,
     type,
     loop,
-    mirror: loop % 2 === 0,
-    theme: THEMES[(loop - 1) % THEMES.length],
+    mirror,
+    theme,
     meters: fase * 25,
     name: STAGE_INFO[type].name,
     hint: STAGE_INFO[type].hint,
@@ -2738,6 +2803,16 @@ function makeBuilder(mirror) {
   return L;
 }
 
+// Sorteia posições de escadas num intervalo, com distância mínima entre elas.
+function pickSpots(rng, n, lo, hi, minGap, taken) {
+  const out = [];
+  for (let tries = 0; tries < 60 && out.length < n; tries++) {
+    const x = Math.round(lo + rng() * (hi - lo));
+    if (out.concat(taken || []).every((o) => Math.abs(o - x) >= minGap)) out.push(x);
+  }
+  return out;
+}
+
 function buildBarrels(L) {
   const lp = L.plat(88, 52, 136, 52, { dir: 1 });
   const g5a = L.plat(0, 80, 144, 80, { dir: 1 });
@@ -2749,20 +2824,41 @@ function buildBarrels(L) {
   const g0 = L.plat(0, 247, 224, 241);
   const g5 = [g5a, g5b];
 
-  L.ladder(80, g0, g1, { broken: true });
-  L.ladder(184, g0, g1);
-  L.ladder(32, g1, g2);
-  L.ladder(104, g1, g2);
-  L.ladder(72, g2, g3, { broken: true });
-  L.ladder(160, g2, g3);
-  L.ladder(32, g3, g4);
-  L.ladder(112, g3, g4, { broken: true });
-  L.ladder(80, g4, g5, { broken: true });
-  L.ladder(184, g4, g5);
-  L.ladder(128, g5, lp);
-
-  L.hammer(40, g1);
-  L.hammer(168, g4);
+  if (!L.rng) {
+    L.ladder(80, g0, g1, { broken: true });
+    L.ladder(184, g0, g1);
+    L.ladder(32, g1, g2);
+    L.ladder(104, g1, g2);
+    L.ladder(72, g2, g3, { broken: true });
+    L.ladder(160, g2, g3);
+    L.ladder(32, g3, g4);
+    L.ladder(112, g3, g4, { broken: true });
+    L.ladder(80, g4, g5, { broken: true });
+    L.ladder(184, g4, g5);
+    L.ladder(128, g5, lp);
+    L.hammer(40, g1);
+    L.hammer(168, g4);
+  } else {
+    // escadas sorteadas: sempre ao menos uma inteira por andar
+    const r = L.rng;
+    const gaps = [[g0, g1, 40, 198], [g1, g2, 24, 198], [g2, g3, 24, 198], [g3, g4, 24, 198], [g4, g5, 76, 198]];
+    let prev = [];
+    gaps.forEach(([lo, up, a, b]) => {
+      let full = pickSpots(r, r() < 0.55 ? 2 : 1, a, b, 34, prev);
+      if (!full.length) full = pickSpots(r, 1, a, b, 12, prev);
+      if (!full.length) full = [Math.round((a + b) / 2)];
+      const broken = pickSpots(r, Math.floor(r() * 3), a, b, 26, prev.concat(full));
+      full.forEach((x) => L.ladder(x, lo, up));
+      broken.forEach((x) => L.ladder(x, lo, up, { broken: true }));
+      prev = full.concat(broken);
+    });
+    L.ladder(96 + Math.round(r() * 36), g5, lp);
+    const used = L.ladders.map((ld) => (L.mirror ? W - ld.x : ld.x));
+    const h1 = pickSpots(r, 1, 40, 190, 12, used)[0] || 120;
+    const h2 = pickSpots(r, 1, 40, 190, 12, used)[0] || 140;
+    L.hammer(h1, r() < 0.5 ? g1 : g2);
+    L.hammer(h2, r() < 0.5 ? g3 : g4);
+  }
 
   L.goal = lp;
   L.bottom = g0;
@@ -2883,16 +2979,36 @@ function buildRivets(L) {
   const lp = L.plat(150, 56, 186, 56);
   const [F1, F2, F3, F4] = rows;
 
-  [16, 112, 208].forEach((x) => L.ladder(x, f0, F1));
-  [24, 88, 136, 200].forEach((x) => L.ladder(x, F1, F2));
-  [32, 112, 192].forEach((x) => L.ladder(x, F2, F3));
-  [40, 80, 144, 184].forEach((x) => L.ladder(x, F3, F4));
-
-  L.hammer(42, F2[0]);
-  L.hammer(186, F3[4]);
-  L.item(112, F1[2], 'bolsa');
-  L.item(190, F2[4], 'guarda-chuva');
-  L.item(44, F4[0], 'chapéu');
+  if (!L.rng) {
+    [16, 112, 208].forEach((x) => L.ladder(x, f0, F1));
+    [24, 88, 136, 200].forEach((x) => L.ladder(x, F1, F2));
+    [32, 112, 192].forEach((x) => L.ladder(x, F2, F3));
+    [40, 80, 144, 184].forEach((x) => L.ladder(x, F3, F4));
+    L.hammer(42, F2[0]);
+    L.hammer(186, F3[4]);
+    L.item(112, F1[2], 'bolsa');
+    L.item(190, F2[4], 'guarda-chuva');
+    L.item(44, F4[0], 'chapéu');
+  } else {
+    const r = L.rng;
+    const pairs = [[f0, F1, 0], [F1, F2, 1], [F2, F3, 2], [F3, F4, 3]];
+    pairs.forEach(([lo, up, i]) => {
+      const a = spans[i][0] + 8, b = spans[i][1] - 8;
+      const xs = pickSpots(r, 1 + Math.floor(r() * 2), 70, 154, 30, []);
+      if (r() < 0.65) xs.push(Math.round(a + r() * (46 - a)));
+      if (r() < 0.65) xs.push(Math.round(178 + r() * (b - 178)));
+      xs.forEach((x) => L.ladder(x, lo, up));
+    });
+    const kinds = ['bolsa', 'guarda-chuva', 'chapéu'];
+    const rows2 = [F1, F2, F3, F4];
+    L.hammer(Math.round(70 + r() * 84), rows2[r() < 0.5 ? 0 : 1][2]);
+    L.hammer(Math.round(70 + r() * 84), rows2[2][2]);
+    kinds.forEach((k, i) => {
+      const row = rows2[(i + Math.floor(r() * 4)) % 4];
+      const seg = row[2];
+      L.item(Math.round(70 + r() * 84), seg, k);
+    });
+  }
 
   L.goal = null;
   L.bottom = f0;
@@ -2905,9 +3021,10 @@ function buildRivets(L) {
 
 const BUILDERS = { barrels: buildBarrels, conveyor: buildConveyor, elevator: buildElevator, rivets: buildRivets };
 
-function buildLevel(fase) {
-  const info = faseInfo(fase);
+function buildLevel(fase, seed) {
+  const info = faseInfo(fase, seed);
   const L = makeBuilder(info.mirror);
+  L.rng = seed != null ? seeded(seed * 131 + fase * 7331) : null;
   BUILDERS[info.type](L);
   Object.assign(L, info);
   L.diff = difficulty(info.loop);
@@ -3312,7 +3429,7 @@ const Game = (() => {
   }
 
   function loadLevel(fase) {
-    G.level = buildLevel(fase);
+    G.level = buildLevel(fase, G.seed);
     G.fase = fase;
     const lv = G.level;
     G.barrels = [];
@@ -3430,10 +3547,18 @@ const Game = (() => {
         }
       }
       if (lv.oil && s === lv.bottom && lv.type === 'barrels' && Math.abs(b.x - lv.oil.x) < 9) absorbAtDrum(b);
-      if (b.x < -12 || b.x > W + 12) b.dead = true;
+      if (b.x < 2 || b.x > W - 2) {
+        b.x = clamp(b.x, 2, W - 2);
+        b.dir = -b.dir;
+      }
     } else if (b.state === 'fall') {
       b.vy += PHYS.GRAV * dt;
       b.x += b.vx * dt;
+      // paredes invisíveis: o barril nunca sai pela lateral
+      if (b.x < 5 || b.x > W - 5) {
+        b.x = clamp(b.x, 5, W - 5);
+        b.vx = -b.vx * 0.5;
+      }
       b.rot += (b.vx * dt) / 5;
       const prevY = b.y;
       b.y += b.vy * dt;
@@ -3444,6 +3569,7 @@ const Game = (() => {
           b.plat = s;
           if (!b.bounced && b.vy > 80) {
             b.vy = -b.vy * 0.32;
+            b.vx = s.dir * 18;
             b.bounced = true;
           } else {
             b.state = 'roll';
@@ -4212,6 +4338,7 @@ const Game = (() => {
     G.rivetsRemoved = new Set();
     G.paused = false;
     G.startFase = 1;
+    G.seed = null;
     loadLevel(1);
     G.level.oil.lit = false;
     setState('play');
@@ -4222,6 +4349,7 @@ const Game = (() => {
   function start(cfg) {
     G.mode = cfg.mode;
     G.startFase = cfg.startFase || 1;
+    G.seed = cfg.random ? Math.floor(Math.random() * 1e9) : null;
     G.ranked = G.startFase === 1;
     G.hiscore = cfg.hiscore || 0;
     G.players = cfg.players.map((info, i) => newPlayer(i, info));
@@ -4358,13 +4486,17 @@ const Render = (() => {
     return lines;
   }
 
+  // Contador de vidas: coração + "×N" (N conta a vida atual).
   function lives(p, x, y, align) {
-    const n = Math.min(p.lives - (p.dead ? 0 : 1), 6);
-    for (let i = 0; i < n; i++) {
-      const cx = align === 'right' ? x - i * 5 : x + i * 5;
-      Art.circle(ctx, cx, y, 1.9, p.color);
-      Art.circle(ctx, cx, y, 0.8, '#ffffff');
-    }
+    const n = Math.max(0, p.lives);
+    const label = '×' + n;
+    ctx.font = `400 4.6px ${FONT_D}`;
+    const tw = ctx.measureText(label).width;
+    const total = 6 + tw;
+    const x0 = align === 'right' ? x - total : x;
+    const low = n <= 1 && Math.floor(clock * 3) % 2 === 0;
+    Art.heart(ctx, x0 + 2.4, y + 0.4, 0.62, low ? '#ffffff' : '#ff3d7f', false);
+    text(label, x0 + 5.6, y + 0.2, 4.6, low ? '#ff8fa3' : '#ffffff', 'left');
   }
 
   function hud(G) {
@@ -4378,7 +4510,7 @@ const Render = (() => {
       ctx.globalAlpha = active ? 1 : 0.55;
       text(p.name.toUpperCase(), x, 5.2, 3.8, p.color, align);
       text(fmtScore(p.score), x, 11.6, 6.4, '#ffffff', align);
-      if (!p.out) lives(p, align === 'right' ? x - 1.5 : x + 1.5, 18, align);
+      if (!p.out) lives(p, x, 18, align);
       else text('FORA', x, 18, 3.2, '#a9a3cf', align);
       ctx.globalAlpha = 1;
     };
@@ -4634,7 +4766,7 @@ const Render = (() => {
           ctx.fill();
           text(DEATH_TEXT[p.deadWhy] || 'Ops!', W / 2, 123.5, 5.6, '#ffffff', 'center');
           const left = p.lives - 1;
-          text(left > 0 ? `Vidas restantes: ${left}` : 'Última vida perdida', W / 2, 131.5, 4.6, '#ffd166', 'center', FONT_B);
+          text(left > 0 ? `Vidas restantes: ${left}` : 'Acabaram as vidas', W / 2, 131.5, 4.6, '#ffd166', 'center', FONT_B);
         }
       }
       if (G.state === 'clear' && G.stateT > 0.4) {
@@ -4690,6 +4822,8 @@ const ICON = {
   lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>',
   trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   gear: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zm8.2 4.6l1.6 1.2-1.8 3.2-1.9-.7a7.6 7.6 0 0 1-1.7 1l-.3 2h-3.6l-.3-2a7.6 7.6 0 0 1-1.7-1l-1.9.7-1.8-3.2 1.6-1.2a7.4 7.4 0 0 1 0-2l-1.6-1.2 1.8-3.2 1.9.7a7.6 7.6 0 0 1 1.7-1l.3-2h3.6l.3 2a7.6 7.6 0 0 1 1.7 1l1.9-.7 1.8 3.2-1.6 1.2a7.4 7.4 0 0 1 0 2z"/></svg>',
+  soundOn: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  soundOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 9.5l5 5M21.5 9.5l-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   arrow: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5l7 9H5z"/></svg>',
 };
 
@@ -4700,7 +4834,7 @@ const UI = (() => {
   let scoresCache = null;
   let duelsCache = null;
   let pendingResults = null;
-  const settings = Object.assign({ touch: 'auto', lefty: false }, LS.get('lk.settings', {}));
+  const settings = Object.assign({ touch: 'auto', padLeft: false, random: true }, LS.get('lk.settings', {}));
 
   // ------------------------------------------------------------ montagem
   function build() {
@@ -4713,6 +4847,7 @@ const UI = (() => {
         <div class="pad ctl" id="pad1" data-dir=""><span class="ar u">${ICON.arrow}</span><span class="ar r">${ICON.arrow}</span><span class="ar d">${ICON.arrow}</span><span class="ar l">${ICON.arrow}</span><span class="knob"></span></div>
         <button class="jump ctl" id="jump1" type="button">PULAR</button>
         <button class="iconbtn" id="btnPause" type="button" aria-label="Pausar">${ICON.pause}</button>
+        <button class="iconbtn" id="btnSound" type="button" aria-label="Som">${ICON.soundOn}</button>
       </div>
       <div id="screens"></div>
       <div id="toast" role="status" aria-live="polite" hidden></div>`;
@@ -4726,6 +4861,17 @@ const UI = (() => {
     Input.bindJump($('#jump1'), 1);
     // no modo solo/revezamento, os dois conjuntos controlam o jogador da vez
     $('#btnPause').addEventListener('click', () => pause(true));
+    const paintSound = () => ($('#btnSound').innerHTML = Sound.sfxOn || Sound.musicOn ? ICON.soundOn : ICON.soundOff);
+    paintSound();
+    $('#btnSound').addEventListener('click', () => {
+      Sound.unlock();
+      const on = !(Sound.sfxOn || Sound.musicOn);
+      Sound.setSfx(on);
+      Sound.setMusic(on);
+      paintSound();
+      toast(on ? 'Som ligado' : 'Som desligado');
+      if (on) Sound.play('item');
+    });
     ['pointerdown', 'touchstart'].forEach((ev) => play.addEventListener(ev, () => Sound.unlock(), { passive: true }));
     play.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
     Input.onKey = (e) => {
@@ -4806,8 +4952,9 @@ const UI = (() => {
         const s = clamp(Math.min(areaH * 0.78, vw * 0.42), 110, 200);
         const js = s * 0.64;
         const gut = 18;
-        const padX = settings.lefty ? vw - gut - s : gut;
-        const jumpX = settings.lefty ? gut + 6 : vw - gut - js - 6;
+        // padrão: direcional à direita e PULAR à esquerda
+        const padX = settings.padLeft ? gut : vw - gut - s;
+        const jumpX = settings.padLeft ? vw - gut - js - 6 : gut + 6;
         place(pads[0], padX, top + (areaH - s) / 2, s);
         place(jumps[0], jumpX, top + (areaH - js) / 2 + s * 0.08, js);
       } else {
@@ -4838,8 +4985,8 @@ const UI = (() => {
       const js = s * 0.66;
       if (!duel) {
         const leftX = (side - s) / 2, rightX = vw - side + (side - js) / 2;
-        const padX = settings.lefty ? vw - side + (side - s) / 2 : leftX;
-        const jumpX = settings.lefty ? (side - js) / 2 : rightX;
+        const padX = settings.padLeft ? leftX : vw - side + (side - s) / 2;
+        const jumpX = settings.padLeft ? rightX : (side - js) / 2;
         place(pads[0], padX, vh - s - 26, s);
         place(jumps[0], jumpX, vh - js - 40, js);
       } else {
@@ -4857,6 +5004,12 @@ const UI = (() => {
     pb.style.left = Math.round(pauseX) + 'px';
     pb.style.top = Math.round(pauseY) + 'px';
     pb.hidden = !inGame();
+    // botão de som logo abaixo (ou ao lado, no celular em pé) do pause
+    const sb = $('#btnSound');
+    const sideBySide = touch && portrait;
+    sb.style.left = Math.round(sideBySide ? pauseX + 54 : pauseX) + 'px';
+    sb.style.top = Math.round(sideBySide ? pauseY : pauseY + 54) + 'px';
+    sb.hidden = !inGame();
     // cores dos controles no duelo
     if (session && duel) {
       pads[0].style.setProperty('--c', session.players[0].color);
@@ -5206,6 +5359,7 @@ const UI = (() => {
       const tiles = [];
       for (let f = 1; f <= maxShow; f++) {
         const info = faseInfo(f);
+        if (settings.random && f > 1) info.name = 'Surpresa';
         const open = f <= unlocked;
         tiles.push(`<button class="tile ${open ? '' : 'locked'}" type="button" data-f="${f}" ${open ? '' : 'disabled'} style="--c:${info.theme.girder}">
           <b>${f}</b><span>${info.name}</span><em>${info.meters} m</em>${open ? '' : `<i class="lk">${ICON.lock}</i>`}</button>`);
@@ -5383,12 +5537,16 @@ const UI = (() => {
               ${[['auto', 'Automático'], ['on', 'Sempre'], ['off', 'Nunca']].map(([v, l]) => `<button type="button" data-v="${v}" class="${settings.touch === v ? 'on' : ''}">${l}</button>`).join('')}
             </div>
           </div>
-          <label class="toggle"><span>Modo canhoto (pular à esquerda)</span><input type="checkbox" id="tLefty" ${settings.lefty ? 'checked' : ''}></label>
+          <label class="toggle"><span>Direcional à esquerda (PULAR à direita)</span><input type="checkbox" id="tLefty" ${settings.padLeft ? 'checked' : ''}></label>
+          <label class="toggle"><span>Fases em ordem aleatória</span><input type="checkbox" id="tRandom" ${settings.random ? 'checked' : ''}></label>
+          <button class="btn" type="button" id="tTest">Testar som</button>
           <button class="btn primary" type="button" data-go="home">Pronto</button>
         </div>`);
       $('#tSfx', s).addEventListener('change', (e) => { Sound.unlock(); Sound.setSfx(e.target.checked); });
       $('#tMus', s).addEventListener('change', (e) => { Sound.unlock(); Sound.setMusic(e.target.checked); });
-      $('#tLefty', s).addEventListener('change', (e) => { settings.lefty = e.target.checked; LS.set('lk.settings', settings); });
+      $('#tLefty', s).addEventListener('change', (e) => { settings.padLeft = e.target.checked; LS.set('lk.settings', settings); });
+      $('#tRandom', s).addEventListener('change', (e) => { settings.random = e.target.checked; LS.set('lk.settings', settings); });
+      $('#tTest', s).addEventListener('click', () => { Sound.unlock(); Sound.setSfx(true); Sound.play('item'); $('#tSfx', s).checked = true; });
       $$('#segTouch button', s).forEach((b) => b.addEventListener('click', () => {
         settings.touch = b.dataset.v;
         LS.set('lk.settings', settings);
@@ -5518,6 +5676,7 @@ const UI = (() => {
     Sound.unlock();
     Game.start({
       mode: cfg.mode,
+      random: settings.random,
       startFase: cfg.startFase || 1,
       hiscore: topScore(scores),
       players: cfg.players.map((p) => ({ pid: p.id || null, name: p.name, color: p.color })),
@@ -5531,6 +5690,7 @@ const UI = (() => {
     if (v) go('pause');
     else hideScreens();
     $('#btnPause').hidden = v;
+    $('#btnSound').hidden = v;
   }
 
   function onProgress(data) {
@@ -5581,6 +5741,7 @@ const UI = (() => {
   async function onGameOver(r) {
     const cfg = session;
     $('#btnPause').hidden = true;
+    $('#btnSound').hidden = true;
     const saved = await saveResults(r, false);
     setTimeout(() => {
       if (session !== cfg) return;

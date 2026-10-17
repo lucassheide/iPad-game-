@@ -93,13 +93,17 @@ const Render = (() => {
     return lines;
   }
 
+  // Contador de vidas: coração + "×N" (N conta a vida atual).
   function lives(p, x, y, align) {
-    const n = Math.min(p.lives - (p.dead ? 0 : 1), 6);
-    for (let i = 0; i < n; i++) {
-      const cx = align === 'right' ? x - i * 5 : x + i * 5;
-      Art.circle(ctx, cx, y, 1.9, p.color);
-      Art.circle(ctx, cx, y, 0.8, '#ffffff');
-    }
+    const n = Math.max(0, p.lives);
+    const label = '×' + n;
+    ctx.font = `400 4.6px ${FONT_D}`;
+    const tw = ctx.measureText(label).width;
+    const total = 6 + tw;
+    const x0 = align === 'right' ? x - total : x;
+    const low = n <= 1 && Math.floor(clock * 3) % 2 === 0;
+    Art.heart(ctx, x0 + 2.4, y + 0.4, 0.62, low ? '#ffffff' : '#ff3d7f', false);
+    text(label, x0 + 5.6, y + 0.2, 4.6, low ? '#ff8fa3' : '#ffffff', 'left');
   }
 
   function hud(G) {
@@ -113,7 +117,7 @@ const Render = (() => {
       ctx.globalAlpha = active ? 1 : 0.55;
       text(p.name.toUpperCase(), x, 5.2, 3.8, p.color, align);
       text(fmtScore(p.score), x, 11.6, 6.4, '#ffffff', align);
-      if (!p.out) lives(p, align === 'right' ? x - 1.5 : x + 1.5, 18, align);
+      if (!p.out) lives(p, x, 18, align);
       else text('FORA', x, 18, 3.2, '#a9a3cf', align);
       ctx.globalAlpha = 1;
     };
@@ -369,7 +373,7 @@ const Render = (() => {
           ctx.fill();
           text(DEATH_TEXT[p.deadWhy] || 'Ops!', W / 2, 123.5, 5.6, '#ffffff', 'center');
           const left = p.lives - 1;
-          text(left > 0 ? `Vidas restantes: ${left}` : 'Última vida perdida', W / 2, 131.5, 4.6, '#ffd166', 'center', FONT_B);
+          text(left > 0 ? `Vidas restantes: ${left}` : 'Acabaram as vidas', W / 2, 131.5, 4.6, '#ffd166', 'center', FONT_B);
         }
       }
       if (G.state === 'clear' && G.stateT > 0.4) {

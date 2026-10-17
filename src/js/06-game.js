@@ -395,7 +395,7 @@ const Game = (() => {
   }
 
   function loadLevel(fase) {
-    G.level = buildLevel(fase);
+    G.level = buildLevel(fase, G.seed);
     G.fase = fase;
     const lv = G.level;
     G.barrels = [];
@@ -513,10 +513,18 @@ const Game = (() => {
         }
       }
       if (lv.oil && s === lv.bottom && lv.type === 'barrels' && Math.abs(b.x - lv.oil.x) < 9) absorbAtDrum(b);
-      if (b.x < -12 || b.x > W + 12) b.dead = true;
+      if (b.x < 2 || b.x > W - 2) {
+        b.x = clamp(b.x, 2, W - 2);
+        b.dir = -b.dir;
+      }
     } else if (b.state === 'fall') {
       b.vy += PHYS.GRAV * dt;
       b.x += b.vx * dt;
+      // paredes invisíveis: o barril nunca sai pela lateral
+      if (b.x < 5 || b.x > W - 5) {
+        b.x = clamp(b.x, 5, W - 5);
+        b.vx = -b.vx * 0.5;
+      }
       b.rot += (b.vx * dt) / 5;
       const prevY = b.y;
       b.y += b.vy * dt;
@@ -527,6 +535,7 @@ const Game = (() => {
           b.plat = s;
           if (!b.bounced && b.vy > 80) {
             b.vy = -b.vy * 0.32;
+            b.vx = s.dir * 18;
             b.bounced = true;
           } else {
             b.state = 'roll';
@@ -1295,6 +1304,7 @@ const Game = (() => {
     G.rivetsRemoved = new Set();
     G.paused = false;
     G.startFase = 1;
+    G.seed = null;
     loadLevel(1);
     G.level.oil.lit = false;
     setState('play');
@@ -1305,6 +1315,7 @@ const Game = (() => {
   function start(cfg) {
     G.mode = cfg.mode;
     G.startFase = cfg.startFase || 1;
+    G.seed = cfg.random ? Math.floor(Math.random() * 1e9) : null;
     G.ranked = G.startFase === 1;
     G.hiscore = cfg.hiscore || 0;
     G.players = cfg.players.map((info, i) => newPlayer(i, info));

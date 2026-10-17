@@ -10,7 +10,40 @@ const Sound = (() => {
   let step = 0;
   let nextTime = 0;
 
+  // No iPhone/iPad o som só liga depois de um toque, e a chave de silencioso
+  // emudece o WebAudio. Isto força a sessão de áudio em modo "reprodução".
+  let silentEl = null;
+  function silentWav() {
+    const n = 800, buf = new ArrayBuffer(44 + n), v = new DataView(buf);
+    const w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+    w(0, 'RIFF'); v.setUint32(4, 36 + n, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 8000, true);
+    v.setUint16(32, 1, true); v.setUint16(34, 8, true); w(36, 'data'); v.setUint32(40, n, true);
+    for (let i = 0; i < n; i++) v.setUint8(44 + i, 128);
+    let bin = '';
+    new Uint8Array(buf).forEach((b) => (bin += String.fromCharCode(b)));
+    return 'data:audio/wav;base64,' + btoa(bin);
+  }
+
+  function iosSession() {
+    try {
+      if (navigator.audioSession) navigator.audioSession.type = 'playback';
+    } catch (e) { /* navegador sem audioSession */ }
+    try {
+      if (!silentEl) {
+        silentEl = document.createElement('audio');
+        silentEl.src = silentWav();
+        silentEl.loop = true;
+        silentEl.setAttribute('playsinline', '');
+        silentEl.volume = 0.01;
+      }
+      const pr = silentEl.play();
+      if (pr && pr.catch) pr.catch(() => {});
+    } catch (e) { /* opcional */ }
+  }
+
   function unlock() {
+    iosSession();
     if (!ctx) {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
@@ -27,15 +60,28 @@ const Sound = (() => {
       master.connect(comp);
       comp.connect(ctx.destination);
       sfxBus = ctx.createGain();
-      sfxBus.gain.value = sfxOn ? 0.55 : 0;
+      sfxBus.gain.value = sfxOn ? 0.85 : 0;
       sfxBus.connect(master);
       musBus = ctx.createGain();
-      musBus.gain.value = musOn ? 0.22 : 0;
+      musBus.gain.value = musOn ? 0.34 : 0;
       musBus.connect(master);
       setInterval(schedule, 40);
     }
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    if (ctx.state !== 'running') ctx.resume().catch(() => {});
+    // um buffer mudo tocado dentro do toque destrava o áudio no Safari
+    try {
+      const b = ctx.createBuffer(1, 1, 22050);
+      const src = ctx.createBufferSource();
+      src.buffer = b;
+      src.connect(ctx.destination);
+      src.start(0);
+    } catch (e) { /* ok */ }
   }
+
+  ['touchend', 'click', 'keydown', 'pointerup'].forEach((ev) =>
+    window.addEventListener(ev, () => {
+      if (!ctx || ctx.state !== 'running') unlock();
+    }, { capture: true, passive: true }));
 
   const mfreq = (n) => 440 * Math.pow(2, (n - 69) / 12);
 
@@ -207,13 +253,13 @@ const Sound = (() => {
   function setSfx(on) {
     sfxOn = on;
     LS.set('lk.sfx', on);
-    if (sfxBus) sfxBus.gain.value = on ? 0.55 : 0;
+    if (sfxBus) sfxBus.gain.value = on ? 0.85 : 0;
   }
 
   function setMusic(on) {
     musOn = on;
     LS.set('lk.music', on);
-    if (musBus) musBus.gain.value = on ? 0.22 : 0;
+    if (musBus) musBus.gain.value = on ? 0.34 : 0;
   }
 
   function play(name, arg) {
@@ -230,6 +276,6 @@ const Sound = (() => {
     setSfx,
     setMusic,
     suspend() { if (ctx && ctx.state === 'running') ctx.suspend().catch(() => {}); },
-    resume() { if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {}); },
+    resume() { if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {}); },
   };
 })();

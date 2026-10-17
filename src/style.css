@@ -177,7 +177,8 @@ input:focus-visible {
   height: 40px;
 }
 
-#btnPause {
+#btnPause,
+#btnSound {
   position: absolute;
   z-index: 3;
 }
