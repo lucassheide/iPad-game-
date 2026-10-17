@@ -40,6 +40,7 @@ const Game = (() => {
     tally: 0,
   };
   const handlers = {};
+  let widthFactor = () => 1;
   const emit = (name, data) => (handlers[name] || []).forEach((fn) => fn(data));
   const on = (name, fn) => ((handlers[name] = handlers[name] || []).push(fn));
 
@@ -395,7 +396,7 @@ const Game = (() => {
   }
 
   function loadLevel(fase) {
-    G.level = buildLevel(fase, G.seed);
+    G.level = buildLevel(fase, G.seed, G.mode === 'attract' ? 1 : widthFactor());
     G.fase = fase;
     const lv = G.level;
     G.barrels = [];
@@ -960,7 +961,8 @@ const Game = (() => {
           r.side[p.slot] = 0;
           continue;
         }
-        const s = p.x < r.x - 4 ? -1 : p.x > r.x + 4 ? 1 : 0;
+        const hw = (r.plat.x2 - r.plat.x1) / 2;
+        const s = p.x < r.x - hw ? -1 : p.x > r.x + hw ? 1 : 0;
         if (!s) continue;
         if (r.side[p.slot] && s !== r.side[p.slot]) {
           r.removed = true;
@@ -1223,8 +1225,9 @@ const Game = (() => {
       }
     }
     G.bonusT += dt;
-    if (G.bonusT >= BONUS_TICK) {
-      G.bonusT -= BONUS_TICK;
+    const tick = BONUS_TICK * (W / BASE_W); // fase mais larga, mais tempo
+    if (G.bonusT >= tick) {
+      G.bonusT -= tick;
       G.bonus = Math.max(0, G.bonus - 100);
       if (G.bonus === 0) {
         alive().forEach((p) => kill(p, 'tempo'));
@@ -1353,5 +1356,5 @@ const Game = (() => {
     return r;
   }
 
-  return { G, on, tick, start, startAttract, setPaused, quit, results, supportAt };
+  return { G, on, setWidthFactor: (fn) => (widthFactor = fn), tick, start, startAttract, setPaused, quit, results, supportAt };
 })();

@@ -1,7 +1,9 @@
 'use strict';
 
 // Mundo lógico do jogo (unidades do mundo, desenhado em vetor e escalado para a tela).
-const W = 224;
+// A largura cresce com o celular deitado (as fases se espalham na horizontal).
+const BASE_W = 224;
+let W = BASE_W;
 const H = 256;
 const TAU = Math.PI * 2;
 

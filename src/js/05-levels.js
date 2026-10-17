@@ -74,11 +74,14 @@ function difficulty(loop) {
   };
 }
 
-function makeBuilder(mirror) {
-  const m = (x) => (mirror ? W - x : x);
+function makeBuilder(mirror, k) {
+  // coordenadas das fases são escritas para 224 de largura e escaladas por k
+  const m = (x) => (mirror ? BASE_W - x : x) * k;
   const L = {
     mirror,
     m,
+    k,
+    um: (x) => (mirror ? BASE_W - x / k : x / k),
     md: (d) => (mirror ? -d : d),
     platforms: [],
     ladders: [],
@@ -199,7 +202,7 @@ function buildBarrels(L) {
       prev = full.concat(broken);
     });
     L.ladder(96 + Math.round(r() * 36), g5, lp);
-    const used = L.ladders.map((ld) => (L.mirror ? W - ld.x : ld.x));
+    const used = L.ladders.map((ld) => L.um(ld.x));
     const h1 = pickSpots(r, 1, 40, 190, 12, used)[0] || 120;
     const h2 = pickSpots(r, 1, 40, 190, 12, used)[0] || 140;
     L.hammer(h1, r() < 0.5 ? g1 : g2);
@@ -285,8 +288,8 @@ function buildElevator(L) {
   L.ladder(184, r3, t);
   L.ladder(160, t, lp);
 
-  L.shafts.push({ x: L.m(60), w: 20, dir: -1, top: 104, bottom: 262, spacing: 62, plats: [] });
-  L.shafts.push({ x: L.m(146), w: 20, dir: 1, top: 106, bottom: 262, spacing: 62, plats: [] });
+  L.shafts.push({ x: L.m(60), w: 20 * L.k, dir: -1, top: 104, bottom: 262, spacing: 62, plats: [] });
+  L.shafts.push({ x: L.m(146), w: 20 * L.k, dir: 1, top: 106, bottom: 262, spacing: 62, plats: [] });
 
   L.item(14, l2, 'bolsa');
   L.item(214, r1, 'guarda-chuva');
@@ -298,7 +301,7 @@ function buildElevator(L) {
   L.start2 = L.at(30, s0);
   L.lara = Object.assign(L.at(130, lp), { dir: L.md(1) });
   L.lucas = Object.assign(L.at(38, t), { dir: L.md(1), minX: L.m(38), maxX: L.m(38) });
-  L.springLine = { plat: t, x0: L.m(58), endX: L.mirror ? W - 208 : 208 };
+  L.springLine = { plat: t, x0: L.m(58), endX: L.m(208) };
   L.fireStarts = [L.at(96, m1), L.at(108, m2), L.at(200, r1)];
 }
 
@@ -361,15 +364,17 @@ function buildRivets(L) {
   L.start = L.at(28, f0);
   L.start2 = L.at(196, f0);
   L.lara = Object.assign(L.at(170, lp), { dir: L.md(-1) });
-  L.lucas = Object.assign(L.at(112, F4[2]), { dir: 1, minX: 86, maxX: 138 });
+  L.lucas = Object.assign(L.at(112, F4[2]), { dir: 1, minX: L.m(112) - 26 * L.k, maxX: L.m(112) + 26 * L.k });
   L.foxFloors = [f0].concat(rows.map((r) => [r[0], r[2], r[4]]).flat());
 }
 
 const BUILDERS = { barrels: buildBarrels, conveyor: buildConveyor, elevator: buildElevator, rivets: buildRivets };
 
-function buildLevel(fase, seed) {
+function buildLevel(fase, seed, k) {
+  k = clamp(k || 1, 1, 1.4);
+  W = Math.round(BASE_W * k);
   const info = faseInfo(fase, seed);
-  const L = makeBuilder(info.mirror);
+  const L = makeBuilder(info.mirror, W / BASE_W);
   L.rng = seed != null ? seeded(seed * 131 + fase * 7331) : null;
   BUILDERS[info.type](L);
   Object.assign(L, info);

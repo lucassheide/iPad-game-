@@ -745,7 +745,9 @@ p { margin: 0; line-height: 1.45; }
 'use strict';
 
 // Mundo lógico do jogo (unidades do mundo, desenhado em vetor e escalado para a tela).
-const W = 224;
+// A largura cresce com o celular deitado (as fases se espalham na horizontal).
+const BASE_W = 224;
+let W = BASE_W;
 const H = 256;
 const TAU = Math.PI * 2;
 
@@ -1606,7 +1608,7 @@ const Art = (() => {
     ctx.globalAlpha = 1;
 
     // Lua com halo suave.
-    const mx = 196, my = 46;
+    const mx = W - 28, my = 46;
     const halo = ctx.createRadialGradient(mx, my, 4, mx, my, 34);
     halo.addColorStop(0, hexA(th.moon, 0.35));
     halo.addColorStop(1, hexA(th.moon, 0));
@@ -1724,13 +1726,14 @@ const Art = (() => {
     ctx.fill();
   }
 
-  function rivet(ctx, x, y) {
+  function rivet(ctx, x, y, w) {
+    const hw = (w || 8) / 2;
     const g = ctx.createLinearGradient(0, y, 0, y + GT);
     g.addColorStop(0, '#fff0a8');
     g.addColorStop(0.5, '#ffc93c');
     g.addColorStop(1, '#c98a12');
     ctx.fillStyle = g;
-    rr(ctx, x - 4, y, 8, GT, 1.6);
+    rr(ctx, x - hw, y, hw * 2, GT, 1.6);
     ctx.fill();
     circle(ctx, x, y + GT / 2, 1.8, '#a96f08');
     line(ctx, [x - 1, y + GT / 2 - 1, x + 1, y + GT / 2 + 1], '#ffe48a', 0.5);
@@ -2728,11 +2731,14 @@ function difficulty(loop) {
   };
 }
 
-function makeBuilder(mirror) {
-  const m = (x) => (mirror ? W - x : x);
+function makeBuilder(mirror, k) {
+  // coordenadas das fases são escritas para 224 de largura e escaladas por k
+  const m = (x) => (mirror ? BASE_W - x : x) * k;
   const L = {
     mirror,
     m,
+    k,
+    um: (x) => (mirror ? BASE_W - x / k : x / k),
     md: (d) => (mirror ? -d : d),
     platforms: [],
     ladders: [],
@@ -2853,7 +2859,7 @@ function buildBarrels(L) {
       prev = full.concat(broken);
     });
     L.ladder(96 + Math.round(r() * 36), g5, lp);
-    const used = L.ladders.map((ld) => (L.mirror ? W - ld.x : ld.x));
+    const used = L.ladders.map((ld) => L.um(ld.x));
     const h1 = pickSpots(r, 1, 40, 190, 12, used)[0] || 120;
     const h2 = pickSpots(r, 1, 40, 190, 12, used)[0] || 140;
     L.hammer(h1, r() < 0.5 ? g1 : g2);
@@ -2939,8 +2945,8 @@ function buildElevator(L) {
   L.ladder(184, r3, t);
   L.ladder(160, t, lp);
 
-  L.shafts.push({ x: L.m(60), w: 20, dir: -1, top: 104, bottom: 262, spacing: 62, plats: [] });
-  L.shafts.push({ x: L.m(146), w: 20, dir: 1, top: 106, bottom: 262, spacing: 62, plats: [] });
+  L.shafts.push({ x: L.m(60), w: 20 * L.k, dir: -1, top: 104, bottom: 262, spacing: 62, plats: [] });
+  L.shafts.push({ x: L.m(146), w: 20 * L.k, dir: 1, top: 106, bottom: 262, spacing: 62, plats: [] });
 
   L.item(14, l2, 'bolsa');
   L.item(214, r1, 'guarda-chuva');
@@ -2952,7 +2958,7 @@ function buildElevator(L) {
   L.start2 = L.at(30, s0);
   L.lara = Object.assign(L.at(130, lp), { dir: L.md(1) });
   L.lucas = Object.assign(L.at(38, t), { dir: L.md(1), minX: L.m(38), maxX: L.m(38) });
-  L.springLine = { plat: t, x0: L.m(58), endX: L.mirror ? W - 208 : 208 };
+  L.springLine = { plat: t, x0: L.m(58), endX: L.m(208) };
   L.fireStarts = [L.at(96, m1), L.at(108, m2), L.at(200, r1)];
 }
 
@@ -3015,15 +3021,17 @@ function buildRivets(L) {
   L.start = L.at(28, f0);
   L.start2 = L.at(196, f0);
   L.lara = Object.assign(L.at(170, lp), { dir: L.md(-1) });
-  L.lucas = Object.assign(L.at(112, F4[2]), { dir: 1, minX: 86, maxX: 138 });
+  L.lucas = Object.assign(L.at(112, F4[2]), { dir: 1, minX: L.m(112) - 26 * L.k, maxX: L.m(112) + 26 * L.k });
   L.foxFloors = [f0].concat(rows.map((r) => [r[0], r[2], r[4]]).flat());
 }
 
 const BUILDERS = { barrels: buildBarrels, conveyor: buildConveyor, elevator: buildElevator, rivets: buildRivets };
 
-function buildLevel(fase, seed) {
+function buildLevel(fase, seed, k) {
+  k = clamp(k || 1, 1, 1.4);
+  W = Math.round(BASE_W * k);
   const info = faseInfo(fase, seed);
-  const L = makeBuilder(info.mirror);
+  const L = makeBuilder(info.mirror, W / BASE_W);
   L.rng = seed != null ? seeded(seed * 131 + fase * 7331) : null;
   BUILDERS[info.type](L);
   Object.assign(L, info);
@@ -3074,6 +3082,7 @@ const Game = (() => {
     tally: 0,
   };
   const handlers = {};
+  let widthFactor = () => 1;
   const emit = (name, data) => (handlers[name] || []).forEach((fn) => fn(data));
   const on = (name, fn) => ((handlers[name] = handlers[name] || []).push(fn));
 
@@ -3429,7 +3438,7 @@ const Game = (() => {
   }
 
   function loadLevel(fase) {
-    G.level = buildLevel(fase, G.seed);
+    G.level = buildLevel(fase, G.seed, G.mode === 'attract' ? 1 : widthFactor());
     G.fase = fase;
     const lv = G.level;
     G.barrels = [];
@@ -3994,7 +4003,8 @@ const Game = (() => {
           r.side[p.slot] = 0;
           continue;
         }
-        const s = p.x < r.x - 4 ? -1 : p.x > r.x + 4 ? 1 : 0;
+        const hw = (r.plat.x2 - r.plat.x1) / 2;
+        const s = p.x < r.x - hw ? -1 : p.x > r.x + hw ? 1 : 0;
         if (!s) continue;
         if (r.side[p.slot] && s !== r.side[p.slot]) {
           r.removed = true;
@@ -4257,8 +4267,9 @@ const Game = (() => {
       }
     }
     G.bonusT += dt;
-    if (G.bonusT >= BONUS_TICK) {
-      G.bonusT -= BONUS_TICK;
+    const tick = BONUS_TICK * (W / BASE_W); // fase mais larga, mais tempo
+    if (G.bonusT >= tick) {
+      G.bonusT -= tick;
       G.bonus = Math.max(0, G.bonus - 100);
       if (G.bonus === 0) {
         alive().forEach((p) => kill(p, 'tempo'));
@@ -4387,7 +4398,7 @@ const Game = (() => {
     return r;
   }
 
-  return { G, on, tick, start, startAttract, setPaused, quit, results, supportAt };
+  return { G, on, setWidthFactor: (fn) => (widthFactor = fn), tick, start, startAttract, setPaused, quit, results, supportAt };
 })();
 
 // ---- 07-render.js
@@ -4441,7 +4452,7 @@ const Render = (() => {
       if (p.kind === 'girder' || p.kind === 'floor') Art.girder(c, p, lv.theme);
     });
     lv.rivets.forEach((r) => {
-      if (!r.removed) Art.rivet(c, r.x, r.y);
+      if (!r.removed) Art.rivet(c, r.x, r.y, r.plat.x2 - r.plat.x1);
     });
   }
 
@@ -4890,6 +4901,8 @@ const UI = (() => {
       }
     });
     Game.on('over', onGameOver);
+    Game.setWidthFactor(wideFactor);
+    Game.on('state', (st) => st === 'intro' && layout());
     Game.on('progress', onProgress);
     layout();
   }
@@ -4909,6 +4922,17 @@ const UI = (() => {
     if (settings.touch === 'on') return true;
     if (settings.touch === 'off') return false;
     return navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
+  }
+
+  // Com o celular deitado, a fase fica mais larga para aproveitar a tela,
+  // deixando nas laterais só o espaço dos controles.
+  function wideFactor() {
+    if (!play || !hasTouch()) return 1;
+    const vw = play.clientWidth, vh = play.clientHeight;
+    if (vh > vw * 1.05) return 1;
+    // espaço reservado para cada faixa de controles (maior no iPad)
+    const need = session && session.mode === 'duelo' ? Math.max(160, vh * 0.26) : Math.max(140, vh * 0.24);
+    return clamp(((vw - need * 2) / vh) * (H / BASE_W), 1, 1.4);
   }
 
   function layout() {

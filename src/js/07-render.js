@@ -48,7 +48,7 @@ const Render = (() => {
       if (p.kind === 'girder' || p.kind === 'floor') Art.girder(c, p, lv.theme);
     });
     lv.rivets.forEach((r) => {
-      if (!r.removed) Art.rivet(c, r.x, r.y);
+      if (!r.removed) Art.rivet(c, r.x, r.y, r.plat.x2 - r.plat.x1);
     });
   }
 

@@ -97,7 +97,7 @@ const Art = (() => {
     ctx.globalAlpha = 1;
 
     // Lua com halo suave.
-    const mx = 196, my = 46;
+    const mx = W - 28, my = 46;
     const halo = ctx.createRadialGradient(mx, my, 4, mx, my, 34);
     halo.addColorStop(0, hexA(th.moon, 0.35));
     halo.addColorStop(1, hexA(th.moon, 0));
@@ -215,13 +215,14 @@ const Art = (() => {
     ctx.fill();
   }
 
-  function rivet(ctx, x, y) {
+  function rivet(ctx, x, y, w) {
+    const hw = (w || 8) / 2;
     const g = ctx.createLinearGradient(0, y, 0, y + GT);
     g.addColorStop(0, '#fff0a8');
     g.addColorStop(0.5, '#ffc93c');
     g.addColorStop(1, '#c98a12');
     ctx.fillStyle = g;
-    rr(ctx, x - 4, y, 8, GT, 1.6);
+    rr(ctx, x - hw, y, hw * 2, GT, 1.6);
     ctx.fill();
     circle(ctx, x, y + GT / 2, 1.8, '#a96f08');
     line(ctx, [x - 1, y + GT / 2 - 1, x + 1, y + GT / 2 + 1], '#ffe48a', 0.5);

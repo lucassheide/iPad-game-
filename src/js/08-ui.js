@@ -76,6 +76,8 @@ const UI = (() => {
       }
     });
     Game.on('over', onGameOver);
+    Game.setWidthFactor(wideFactor);
+    Game.on('state', (st) => st === 'intro' && layout());
     Game.on('progress', onProgress);
     layout();
   }
@@ -95,6 +97,17 @@ const UI = (() => {
     if (settings.touch === 'on') return true;
     if (settings.touch === 'off') return false;
     return navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
+  }
+
+  // Com o celular deitado, a fase fica mais larga para aproveitar a tela,
+  // deixando nas laterais só o espaço dos controles.
+  function wideFactor() {
+    if (!play || !hasTouch()) return 1;
+    const vw = play.clientWidth, vh = play.clientHeight;
+    if (vh > vw * 1.05) return 1;
+    // espaço reservado para cada faixa de controles (maior no iPad)
+    const need = session && session.mode === 'duelo' ? Math.max(160, vh * 0.26) : Math.max(140, vh * 0.24);
+    return clamp(((vw - need * 2) / vh) * (H / BASE_W), 1, 1.4);
   }
 
   function layout() {
